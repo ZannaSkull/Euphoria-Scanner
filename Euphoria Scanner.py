@@ -23,26 +23,16 @@ ascii_text = r""" {purple}
 {reset} """.format(purple=PURPLE, reset=RESET)
 
 
-async def scan_port(target, port, proxy, results, timeout, server_name):
-    sock = socks.socksocket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.set_proxy(socks.SOCKS5, proxy[0], proxy[1])
-
+async def scan_port(target, port, proxy, results, timeout):
     try:
-        await asyncio.wait_for(sock.connect((target, port)), timeout=timeout)
+        reader, writer = await asyncio.open_connection(proxy[0], int(proxy[1]), limit=timeout)
         results[port] = True
-        save_to_file(server_name, port)
-    except (socket.timeout, asyncio.TimeoutError):
+        writer.close()
+    except (socket.timeout, ConnectionRefusedError):
         results[port] = False
     except Exception as e:
+        print(f"An error occurred while scanning port {port}: {e}")
         results[port] = False
-        print(f"An error occurred while scanning port {port}: {str(e)}")
-    finally:
-        sock.close()
-
-def save_to_file(server_name, port):
-    filename = f"{server_name}.txt"
-    with open(filename, "a") as file:
-        file.write(f"Port {port} is open\n")
 
 async def scan_ports(target, ports, proxies, max_workers, timeout):
     total_ports = len(ports)
@@ -54,11 +44,12 @@ async def scan_ports(target, ports, proxies, max_workers, timeout):
 
     tasks = []
     for port in ports:
+        port = int(port) 
         scanned_ports += 1
         print(f"\rEuphoria Says : Scanned Ports {scanned_ports}", end="")
 
         for proxy in proxies:
-            task = asyncio.ensure_future(scan_port(target, port, proxy, results, timeout, target))
+            task = asyncio.ensure_future(scan_port(target, port, proxy, results, timeout))
             tasks.append(task)
 
     await asyncio.gather(*tasks)
@@ -69,6 +60,7 @@ async def scan_ports(target, ports, proxies, max_workers, timeout):
             break
     else:
         print(f"\n{RED}All ports are closed{RESET}")
+
 
 def main():
     print(ascii_text)
@@ -82,17 +74,22 @@ def main():
         max_workers = int(input("Enter the maximum number of workers (1-2000): "))
         timeout = float(input("Enter the connection timeout in seconds (0.5-1.0): "))
 
-        start_port, end_port = map(int, port_range.split("-"))
-        ports = range(start_port, end_port + 1)
+        if not isinstance(timeout, (int, float)):
+            raise ValueError("Invalid timeout value. Please enter a numeric value.")
 
-        with open(proxy_file, "r") as file:
-            proxies = [line.strip().split(":") for line in file]
+        start_port, end_port = map(int, port_range.split("-"))
+        ports = [str(port) for port in range(start_port, end_port + 1)]
+
+        with open(proxy_file) as file:
+            proxies = [line.strip().split(":") for line in file if ":" in line]
 
         loop = asyncio.get_event_loop()
         loop.run_until_complete(scan_ports(target, ports, proxies, max_workers, timeout))
         loop.close()
-    except Exception as e:
-        print(f"An error occurred during the scan: {str(e)}")
+
+    except KeyboardInterrupt:
+        print("\n\nEuphoria Says : Exiting... Goodbye!")
+
 
 if __name__ == "__main__":
     main()
